@@ -1,0 +1,3 @@
+"""
+MedTriage backend package.
+"""
