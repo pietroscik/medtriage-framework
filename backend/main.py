@@ -2,11 +2,11 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, Dict
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Query, Request, Response, status
+from fastapi import Depends, FastAPI, Query, Request, Response, status, HTTPException
 from sqlalchemy.orm import Session
 
 from .database import Base, engine, get_db
-from .models import StatoConversazione
+from .models import StatoConversazione, Paziente
 from .triage import is_studio_aperto, process_incoming_message
 from .whatsapp_client import send_template_blocking_message
 
@@ -41,6 +41,16 @@ def webhook_verify(
     if hub_mode == "subscribe" and hub_verify_token == VERIFY_TOKEN:
         return Response(content=hub_challenge or "", media_type="text/plain")
     return Response(status_code=status.HTTP_403_FORBIDDEN, content="Forbidden")
+
+@app.post("/gdpr/delete/{paziente_id}")
+def gdpr_delete(paziente_id: int, db: Session = Depends(get_db)):
+    paziente = db.query(Paziente).filter(Paziente.id == paziente_id).first()
+    if not paziente:
+        raise HTTPException(status_code=404, detail="Paziente non trovato")
+    nome_cognome = paziente.nome_cognome
+    db.delete(paziente)
+    db.commit()
+    return {"status": "deleted", "paziente": nome_cognome}
 
 @app.post("/webhook")
 async def webhook_payload(request: Request, db: Session = Depends(get_db)) -> Dict[str, Any]:

@@ -1,9 +1,11 @@
+import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Any, Dict
 from sqlalchemy.orm import Session
 from .models import Paziente, StatoConversazione, Richiesta, TipoRichiesta, StatoRichiesta, ChiusuraStraordinaria, OrarioStudio
 from .whatsapp_client import send_text_message
+from .notifications import send_email_notification
 
 def is_studio_aperto(db: Session) -> bool:
     from .models import ChiusuraStraordinaria, OrarioStudio
@@ -68,18 +70,33 @@ def process_incoming_message(db: Session, numero_telefono: str, message_payload:
     # STATO: REGISTRAZIONE_NOME (Per nuovi pazienti)
     # -------------------------------------------------------------------------
     if stato_conv.stato_attuale == "REGISTRAZIONE_NOME":
-        stato_conv.dati_temporanei = testo_paziente # Salviamo temporaneamente il nome
-        send_text_message(numero_telefono, "Grazie. Ora digita il tuo CODICE FISCALE per completare la scheda:")
-        stato_conv.stato_attuale = "REGISTRAZIONE_CF"
+        stato_conv.dati_temporanei = {"nome_cognome": testo_paziente} # Salviamo temporaneamente il nome
+        send_text_message(
+            numero_telefono,
+            "Grazie. Per continuare, è necessario accettare il trattamento dei dati personali per le finalità di servizio. "
+            "Digita 'SI' per accettare e procedere con la registrazione."
+        )
+        stato_conv.stato_attuale = "ATTESA_CONSENSO"
         stato_conv.ultima_interazione = datetime.utcnow()
         db.commit()
+        return
+
+    if stato_conv.stato_attuale == "ATTESA_CONSENSO":
+        if "si" in testo_paziente.lower():
+            send_text_message(numero_telefono, "Consenso accettato. Ora digita il tuo CODICE FISCALE per completare la scheda:")
+            stato_conv.stato_attuale = "REGISTRAZIONE_CF"
+            db.commit()
+        else:
+            send_text_message(numero_telefono, "Per utilizzare il servizio è necessario fornire il consenso. Se cambi idea, riscrivi 'Ciao'.")
+            stato_conv.stato_attuale = "START" # Reset
+            db.commit()
         return
 
     if stato_conv.stato_attuale == "REGISTRAZIONE_CF":
         # Creiamo definitivamente il paziente nel DB
         nuovo_paziente = Paziente(
-            numero_telefono=numero_telefono,
-            nome_cognome=stato_conv.dati_temporanei,
+            numero_telefono=numero_telefono, 
+            nome_cognome=stato_conv.dati_temporanei.get("nome_cognome"),
             codice_fiscale=testo_paziente.upper()
         )
         db.add(nuovo_paziente)
@@ -128,6 +145,10 @@ def process_incoming_message(db: Session, numero_telefono: str, message_payload:
         )
         db.add(nuova_richiesta)
         
+        # Invia notifica al medico
+        db.flush() # Assicura che la richiesta abbia un ID e le relazioni caricate
+        send_email_notification(nuova_richiesta)
+
         # Inviamo messaggio di chiusura al paziente
         send_text_message(numero_telefono, "Perfetto! La tua richiesta è stata presa in carico ed è stata inviata sul PC della Dottoressa. Verrai notificato qui appena sarà pronta.")
         

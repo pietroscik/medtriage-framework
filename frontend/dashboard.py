@@ -1,9 +1,9 @@
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, date
 import streamlit as st
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, or_
 from sqlalchemy.orm import Session, sessionmaker
 from streamlit_autorefresh import st_autorefresh # Aggiungi questo import in cima al file
 
@@ -11,6 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from backend import models  # noqa: E402
 from backend.database import DATABASE_URL  # noqa: E402
+from backend.whatsapp_client import send_text_message
 
 load_dotenv()
 
@@ -79,26 +80,76 @@ def main() -> None:
     st.title("MedTriage Dashboard")
     st.markdown("Gestione delle richieste attive e archivio delle pratiche")
 
-    richieste_ricette = db.query(models.Richiesta).filter(models.Richiesta.tipo == models.TipoRichiesta.RICETTA, models.Richiesta.stato != models.StatoRichiesta.EVASA).all()
-    richieste_consulti = db.query(models.Richiesta).filter(models.Richiesta.tipo == models.TipoRichiesta.CONSULTO, models.Richiesta.stato != models.StatoRichiesta.EVASA).all()
-    richieste_evasati = db.query(models.Richiesta).filter(models.Richiesta.stato == models.StatoRichiesta.EVASA).all()
+    # --- Filtri ---
+    st.sidebar.markdown("---")
+    st.sidebar.title("Filtri e Ricerca")
+    
+    search_term = st.sidebar.text_input("Cerca per nome o testo")
+    
+    status_filter = st.sidebar.multiselect(
+        "Filtra per stato",
+        options=[s.value for s in models.StatoRichiesta],
+        default=[s.value for s in models.StatoRichiesta if s != models.StatoRichiesta.EVASA]
+    )
+    
+    date_filter = st.sidebar.date_input("Filtra per data", value=None)
+
+    # --- Query al DB con filtri ---
+    query = db.query(models.Richiesta).join(models.Paziente)
+
+    if search_term:
+        query = query.filter(or_(
+            models.Paziente.nome_cognome.ilike(f"%{search_term}%"),
+            models.Richiesta.dettagli.ilike(f"%{search_term}%")
+        ))
+    
+    if status_filter:
+        query = query.filter(models.Richiesta.stato.in_(status_filter))
+
+    if date_filter:
+        query = query.filter(models.Richiesta.data_creazione >= date_filter)
+
+    richieste = query.order_by(models.Richiesta.data_creazione.desc()).all()
+
+    # Separazione per tab
+    richieste_ricette = [r for r in richieste if r.tipo == models.TipoRichiesta.RICETTA]
+    richieste_consulti = [r for r in richieste if r.tipo == models.TipoRichiesta.CONSULTO]
+    richieste_evasati = db.query(models.Richiesta).filter(models.Richiesta.stato == models.StatoRichiesta.EVASA).order_by(models.Richiesta.data_creazione.desc()).limit(100).all()
 
 tab_ricette, tab_consulti, tab_archivio, tab_studio = st.tabs(
-    ["💊 Ricette da fare", "🩺 Consulti", "✅ Archivio Evasati", "⚙️ Gestione Studio"])
+    [f"💊 Ricette ({len(richieste_ricette)})", f"🩺 Consulti ({len(richieste_consulti)})", "✅ Archivio Evasati", "⚙️ Gestione Studio"])
 
     with tab_ricette:
-        st.subheader("Richieste di ricetta in attesa")
+        st.subheader("Richieste di ricette")
         for richiesta in richieste_ricette:
-            paziente = richiesta.paziente
-            if st.button(f"{paziente.nome_cognome} – {richiesta.dettagli or 'Nessun dettaglio'}", key=f"ricetta_{richiesta.id}"):
-                st.session_state.selected_request = richiesta.id
+            with st.expander(f"**{richiesta.paziente.nome_cognome}** - `{richiesta.dettagli}`"):
+                st.write(f"**Data:** {richiesta.data_creazione.strftime('%d/%m/%Y %H:%M')}")
+                st.write(f"**Stato:** {richiesta.stato.value}")
+                
+                risposta_text = st.text_area("Scrivi una risposta...", key=f"risposta_{richiesta.id}")
+                if st.button("Invia Risposta e Completa", key=f"btn_rispondi_{richiesta.id}"):
+                    if risposta_text:
+                        send_text_message(richiesta.paziente.numero_telefono, risposta_text)
+                    richiesta.stato = models.StatoRichiesta.EVASA
+                    db.commit()
+                    st.success("Risposta inviata e richiesta completata!")
+                    st.rerun()
 
     with tab_consulti:
-        st.subheader("Richieste di consulto in attesa")
+        st.subheader("Richieste di consulto")
         for richiesta in richieste_consulti:
-            paziente = richiesta.paziente
-            if st.button(f"{paziente.nome_cognome} – {richiesta.dettagli or 'Nessun dettaglio'}", key=f"consulto_{richiesta.id}"):
-                st.session_state.selected_request = richiesta.id
+            with st.expander(f"**{richiesta.paziente.nome_cognome}** - `{richiesta.dettagli}`"):
+                st.write(f"**Data:** {richiesta.data_creazione.strftime('%d/%m/%Y %H:%M')}")
+                st.write(f"**Stato:** {richiesta.stato.value}")
+                
+                risposta_text = st.text_area("Scrivi una risposta...", key=f"risposta_{richiesta.id}")
+                if st.button("Invia Risposta e Completa", key=f"btn_rispondi_{richiesta.id}"):
+                    if risposta_text:
+                        send_text_message(richiesta.paziente.numero_telefono, risposta_text)
+                    richiesta.stato = models.StatoRichiesta.EVASA
+                    db.commit()
+                    st.success("Risposta inviata e richiesta completata!")
+                    st.rerun()
 
     with tab_archivio:
         st.subheader("Richieste evase")
@@ -113,9 +164,9 @@ tab_ricette, tab_consulti, tab_archivio, tab_studio = st.tabs(
         st.markdown("### 🏖️ Gestione Ferie e Chiusure Straordinarie")
         col_inizio, col_fine, col_motivo = st.columns(3)
         with col_inizio:
-            data_in = st.date_input("Inizio Chiusura", value=datetime.today())
+            data_in = st.date_input("Inizio Chiusura", value=date.today())
         with col_fine:
-            data_fi = st.date_input("Fine Chiusura", value=datetime.today())
+            data_fi = st.date_input("Fine Chiusura", value=date.today())
         with col_motivo:
             motivo_txt = st.text_input("Motivo (opzionale)", placeholder="Es: Ferie estive")
             
@@ -129,7 +180,7 @@ tab_ricette, tab_consulti, tab_archivio, tab_studio = st.tabs(
             db.add(nuova_chiusura)
             db.commit()
             st.success(f"Studio impostato come CHIUSO dal {data_in} al {data_fi}")
-            st.experimental_rerun()
+            st.rerun()
             
         # Mostra le chiusure attive
         chiusure_attive = db.query(models.ChiusuraStraordinaria).filter(models.ChiusuraStraordinaria.data_fine >= datetime.utcnow()).all()
@@ -168,26 +219,7 @@ tab_ricette, tab_consulti, tab_archivio, tab_studio = st.tabs(
                     db.commit()
                     st.success(f"Orario di {giorno} aggiornato!")
 
-    selected_request_id = st.session_state.get("selected_request")
-    selected_paziente = None
-
-    if selected_request_id:
-        selected_request = db.query(models.Richiesta).filter_by(id=selected_request_id).first()
-        if selected_request:
-            selected_paziente = selected_request.paziente
-            st.markdown("### Richiesta selezionata")
-            st.write(f"Tipo: {selected_request.tipo.value}")
-            st.write(f"Stato: {selected_request.stato.value}")
-            st.write(f"Dettagli: {selected_request.dettagli or 'Nessun dettaglio'}")
-
-            if st.button("Segna come evasa"):
-                selected_request.stato = models.StatoRichiesta.EVASA
-                db.add(selected_request)
-                db.commit()
-                st.success("Richiesta marcata come evasa")
-                st.rerun()
-
-    render_sidebar(selected_paziente, db)
+    render_sidebar(None, db) # Sidebar ora usata per filtri, dettagli paziente non più mostrati qui
 
 if __name__ == "__main__":
     main()
