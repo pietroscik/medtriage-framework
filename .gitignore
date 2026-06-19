@@ -1,2 +1,13 @@
 /.venv
 .env
+/medtriage_framework.egg-info
+
+# Python caches
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+
+# tooling caches
+.pytest_cache/
+.mypy_cache/

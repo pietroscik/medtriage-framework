@@ -1,46 +1,41 @@
-import os
-from typing import Generator
-from dotenv import load_dotenv
 from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
-
-load_dotenv()
+from sqlalchemy.orm import sessionmaker, declarative_base
+import os
+import threading
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./medtriage.db")
 
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+Base = declarative_base()
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
-    future=True,
+    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
 )
 
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
-Base = declarative_base()
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-def get_db() -> Generator:
-    db = SessionLocal()
+_tenant_engines: dict[str, object] = {}
+_tenant_lock = threading.Lock()
+
+
+def get_tenant_session_for_medico(medico_id: int):
+    from backend.models import Medico
+
+    master_db = SessionLocal()
     try:
-        yield db
+        medico = master_db.query(Medico).filter(Medico.id == medico_id).first()
+        if not medico or not medico.db_url:
+            raise RuntimeError("Medico non trovato o db_url non configurato")
+        tenant_url = medico.db_url
     finally:
-        db.close()
+        master_db.close()
 
-QUICK_REPLIES = [
-    "Hello, World!",
-    "How are you?",
-    "What's up?",
-    "Goodbye!",
-]
+    with _tenant_lock:
+        tenant_engine = _tenant_engines.get(tenant_url)
+        if tenant_engine is None:
+            connect_args = {"check_same_thread": False} if tenant_url.startswith("sqlite") else {}
+            tenant_engine = create_engine(tenant_url, connect_args=connect_args)
+            _tenant_engines[tenant_url] = tenant_engine
 
-def handle_quick_reply(st):
-    quick_reply_count = len(QUICK_REPLIES) if QUICK_REPLIES else 0
-    if quick_reply_count > 0:
-        cols = st.columns(quick_reply_count)
-        for col, reply in zip(cols, QUICK_REPLIES):
-            if col.button(reply):
-                prompt = reply
-                st.write(f"Quick reply: {prompt}")
-    else:
-        st.write("No quick replies available.")
+    TenantSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=tenant_engine)
+    return TenantSessionLocal()

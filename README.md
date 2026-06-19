@@ -97,3 +97,35 @@ Apri due terminali separati.
     streamlit run frontend/dashboard.py
     ```
     La dashboard sarà accessibile su `http://localhost:8501`.
+
+## Aggiornamenti operativi
+
+- Crittografia (opzionale): se imposti `FERNET_KEY` (base64) i campi sensibili (`anamnesi`, `note`) vengono cifrati. Se non impostata, i campi vengono salvati in chiaro (fallback per compatibilità).
+  - Genera chiave: `python - <<'PY'\nfrom cryptography.fernet import Fernet\nprint(Fernet.generate_key().decode())\nPY`
+  - Esporta: `set FERNET_KEY=la_tua_chiave` (PowerShell / .env).
+
+- Notifiche Telegram:
+  - Imposta `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` per ricevere notifiche su nuove richieste.
+
+- Multi-medico leggero:
+  - Nel dashboard (sidebar) seleziona il "Medico corrente". Le query e le assegnazioni useranno `medico_id` quando presente.
+  - Quando salvi lo stato di una richiesta, se `medico_id` non è impostato viene assegnato il medico corrente.
+
+- Migrazione rapida:
+  - Esegui: `python backend/db_migrate_add_fields.py` per creare colonne `anamnesi`, `note`, `medico_id` e tabelle mancanti.
+
+- Backup DB:
+  - Esegui nightly: `python scripts/backup_db.py`
+  - Configura `BACKUP_DIR` env var se vuoi un percorso diverso.
+
+## Comandi utili
+
+- Installa dipendenze:
+  `pip install -r requirements.txt` (aggiungi cryptography, requests, redis, tenacity, pydantic se mancanti)
+
+- Migrazione rapida:
+  `python backend/db_migrate_add_fields.py`
+
+- Avvio servizi:
+  `uvicorn backend.main:app --reload`
+  `streamlit run frontend/dashboard.py`
