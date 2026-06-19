@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import Column, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, JSON, Table
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -26,6 +26,13 @@ class Paziente(Base):
     farmaci_cronici = relationship("FarmacoCronico", back_populates="paziente", cascade="all, delete-orphan")
     note_anamnesi = relationship("NotaAnamnesi", back_populates="paziente", cascade="all, delete-orphan")
 
+# Tabella di associazione per la relazione molti-a-molti tra Richiesta e Tag
+richiesta_tag_association = Table('richiesta_tag', Base.metadata,
+    Column('richiesta_id', Integer, ForeignKey('richieste.id'), primary_key=True),
+    Column('tag_id', Integer, ForeignKey('tags.id'), primary_key=True)
+)
+
+
 class Richiesta(Base):
     __tablename__ = "richieste"
 
@@ -35,8 +42,19 @@ class Richiesta(Base):
     stato = Column(SAEnum(StatoRichiesta), default=StatoRichiesta.NUOVA, nullable=False)
     dettagli = Column(Text, nullable=True)
     data_creazione = Column(DateTime, default=datetime.utcnow, nullable=False)
+    risposta = Column(Text, nullable=True)
+    data_risposta = Column(DateTime, nullable=True)
 
     paziente = relationship("Paziente", back_populates="richieste")
+    tags = relationship("Tag", secondary=richiesta_tag_association, back_populates="richieste")
+
+class Tag(Base):
+    __tablename__ = "tags"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nome = Column(String(50), unique=True, nullable=False)
+
+    richieste = relationship("Richiesta", secondary=richiesta_tag_association, back_populates="tags")
 
 class FarmacoCronico(Base):
     __tablename__ = "farmaci_cronici"
@@ -64,8 +82,16 @@ class StatoConversazione(Base):
 
     numero_telefono = Column(String(32), primary_key=True, index=True)
     stato_attuale = Column(String(64), default="START", nullable=False)
-    dati_temporanei = Column(Text, nullable=True)
+    dati_temporanei = Column(JSON, nullable=True)
     ultima_interazione = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class RispostaRapida(Base):
+    __tablename__ = "risposte_rapide"
+
+    id = Column(Integer, primary_key=True, index=True)
+    label = Column(String(128), unique=True, nullable=False)
+    testo = Column(Text, nullable=False)
 
 
 class OrarioStudio(Base):

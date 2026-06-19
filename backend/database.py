@@ -26,3 +26,21 @@ def get_db() -> Generator:
         yield db
     finally:
         db.close()
+
+QUICK_REPLIES = [
+    "Hello, World!",
+    "How are you?",
+    "What's up?",
+    "Goodbye!",
+]
+
+def handle_quick_reply(st):
+    quick_reply_count = len(QUICK_REPLIES) if QUICK_REPLIES else 0
+    if quick_reply_count > 0:
+        cols = st.columns(quick_reply_count)
+        for col, reply in zip(cols, QUICK_REPLIES):
+            if col.button(reply):
+                prompt = reply
+                st.write(f"Quick reply: {prompt}")
+    else:
+        st.write("No quick replies available.")

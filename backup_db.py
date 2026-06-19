@@ -4,7 +4,7 @@ import sys
 from datetime import datetime
 
 # Aggiungi la root del progetto al path per importare i moduli backend
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), ".")))
 
 from backend.database import DATABASE_URL
 

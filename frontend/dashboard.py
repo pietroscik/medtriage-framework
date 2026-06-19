@@ -1,225 +1,42 @@
-import os
-import sys
-from datetime import datetime, date
 import streamlit as st
-from dotenv import load_dotenv
-from sqlalchemy import create_engine, or_
+from sqlalchemy import create_engine, or_, text
 from sqlalchemy.orm import Session, sessionmaker
-from streamlit_autorefresh import st_autorefresh # Aggiungi questo import in cima al file
+from streamlit_autorefresh import st_autorefresh
+import os
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# Configuration de la base de données
+DATABASE_URL = "sqlite:///./medtriage.db"
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-from backend import models  # noqa: E402
-from backend.database import DATABASE_URL  # noqa: E402
-from backend.whatsapp_client import send_text_message
+# Configuration de l'auto-refresh
+st_autorefresh(interval=5000, key="datarefresh")
 
-load_dotenv()
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-st.set_page_config(page_title="MedTriage Dashboard", layout="wide")
-PASSWORD = os.getenv("DASHBOARD_PASSWORD", "changeme")
-
-ENGINE = create_engine(DATABASE_URL, future=True)
-SessionLocal = sessionmaker(bind=ENGINE, autoflush=False, autocommit=False, future=True)
-
-def authenticate() -> bool:
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
-    if st.session_state.authenticated:
-        return True
-
-    st.title("MedTriage Framework")
-    password_input = st.text_input("Password", type="password")
-    if st.button("Accedi"):
-        if password_input == PASSWORD:
-            st.session_state.authenticated = True
-            st.rerun()
-        else:
-            st.error("Password errata")
-    return False
-
-def get_db_session() -> Session:
-    return SessionLocal()
-
-def render_sidebar(paziente: models.Paziente | None, db: Session) -> None:
-    st.sidebar.title("Dettagli Paziente")
-    if not paziente:
-        st.sidebar.info("Seleziona una richiesta per visualizzare i dettagli")
-        return
-
-    st.sidebar.subheader(paziente.nome_cognome)
-    st.sidebar.write(f"Numero: {paziente.numero_telefono}")
-    st.sidebar.write(f"Codice fiscale: {paziente.codice_fiscale}")
-
-    note = (
-        db.query(models.NotaAnamnesi)
-        .filter_by(paziente_id=paziente.id)
-        .order_by(models.NotaAnamnesi.data_evento.desc())
-        .all()
-    )
-
-    if note:
-        st.sidebar.markdown("### Timeline Anamnestica")
-        for evento in note:
-            st.sidebar.write(
-                f"- **{evento.data_evento.strftime('%Y-%m-%d')}** · {evento.categoria}: {evento.contenuto}"
-            )
-
-    allergie = [n for n in note if "allerg" in n.categoria.lower() or "allerg" in n.contenuto.lower()]
-    if allergie:
-        st.sidebar.error("Attenzione: paziente con allergie note")
-
-def main() -> None:
-    if not authenticate():
-        return
-
-    db = get_db_session()
-
-    # All'interno di main(), subito dopo db = get_db_session():
-    st_autorefresh(interval=15000, key="datarefresh") # Ricarica i dati da sola ogni 15 secondi
-
+def main():
     st.title("MedTriage Dashboard")
-    st.markdown("Gestione delle richieste attive e archivio delle pratiche")
-
-    # --- Filtri ---
-    st.sidebar.markdown("---")
-    st.sidebar.title("Filtri e Ricerca")
+    st.write("Bienvenue sur la dashboard de MedTriage")
     
-    search_term = st.sidebar.text_input("Cerca per nome o testo")
+    # Affichage des dernières demandes
+    db = next(get_db())
+    richieste = db.query(Richiesta).order_by(Richiesta.data_creazione.desc()).limit(10).all()
     
-    status_filter = st.sidebar.multiselect(
-        "Filtra per stato",
-        options=[s.value for s in models.StatoRichiesta],
-        default=[s.value for s in models.StatoRichiesta if s != models.StatoRichiesta.EVASA]
-    )
-    
-    date_filter = st.sidebar.date_input("Filtra per data", value=None)
-
-    # --- Query al DB con filtri ---
-    query = db.query(models.Richiesta).join(models.Paziente)
-
-    if search_term:
-        query = query.filter(or_(
-            models.Paziente.nome_cognome.ilike(f"%{search_term}%"),
-            models.Richiesta.dettagli.ilike(f"%{search_term}%")
-        ))
-    
-    if status_filter:
-        query = query.filter(models.Richiesta.stato.in_(status_filter))
-
-    if date_filter:
-        query = query.filter(models.Richiesta.data_creazione >= date_filter)
-
-    richieste = query.order_by(models.Richiesta.data_creazione.desc()).all()
-
-    # Separazione per tab
-    richieste_ricette = [r for r in richieste if r.tipo == models.TipoRichiesta.RICETTA]
-    richieste_consulti = [r for r in richieste if r.tipo == models.TipoRichiesta.CONSULTO]
-    richieste_evasati = db.query(models.Richiesta).filter(models.Richiesta.stato == models.StatoRichiesta.EVASA).order_by(models.Richiesta.data_creazione.desc()).limit(100).all()
-
-tab_ricette, tab_consulti, tab_archivio, tab_studio = st.tabs(
-    [f"💊 Ricette ({len(richieste_ricette)})", f"🩺 Consulti ({len(richieste_consulti)})", "✅ Archivio Evasati", "⚙️ Gestione Studio"])
-
-    with tab_ricette:
-        st.subheader("Richieste di ricette")
-        for richiesta in richieste_ricette:
-            with st.expander(f"**{richiesta.paziente.nome_cognome}** - `{richiesta.dettagli}`"):
-                st.write(f"**Data:** {richiesta.data_creazione.strftime('%d/%m/%Y %H:%M')}")
-                st.write(f"**Stato:** {richiesta.stato.value}")
-                
-                risposta_text = st.text_area("Scrivi una risposta...", key=f"risposta_{richiesta.id}")
-                if st.button("Invia Risposta e Completa", key=f"btn_rispondi_{richiesta.id}"):
-                    if risposta_text:
-                        send_text_message(richiesta.paziente.numero_telefono, risposta_text)
-                    richiesta.stato = models.StatoRichiesta.EVASA
-                    db.commit()
-                    st.success("Risposta inviata e richiesta completata!")
-                    st.rerun()
-
-    with tab_consulti:
-        st.subheader("Richieste di consulto")
-        for richiesta in richieste_consulti:
-            with st.expander(f"**{richiesta.paziente.nome_cognome}** - `{richiesta.dettagli}`"):
-                st.write(f"**Data:** {richiesta.data_creazione.strftime('%d/%m/%Y %H:%M')}")
-                st.write(f"**Stato:** {richiesta.stato.value}")
-                
-                risposta_text = st.text_area("Scrivi una risposta...", key=f"risposta_{richiesta.id}")
-                if st.button("Invia Risposta e Completa", key=f"btn_rispondi_{richiesta.id}"):
-                    if risposta_text:
-                        send_text_message(richiesta.paziente.numero_telefono, risposta_text)
-                    richiesta.stato = models.StatoRichiesta.EVASA
-                    db.commit()
-                    st.success("Risposta inviata e richiesta completata!")
-                    st.rerun()
-
-    with tab_archivio:
-        st.subheader("Richieste evase")
-        for richiesta in richieste_evasati:
-            paziente = richiesta.paziente
-            st.write(f"{richiesta.data_creazione.strftime('%Y-%m-%d')} · {paziente.nome_cognome} · {richiesta.tipo.value} · {richiesta.dettagli or 'Nessun dettaglio'}")
-    
-    with tab_studio:
-        st.subheader("Configurazione Apertura e Chiusure dello Studio")
-        
-        # Sezione FERIE / CHIUSURE
-        st.markdown("### 🏖️ Gestione Ferie e Chiusure Straordinarie")
-        col_inizio, col_fine, col_motivo = st.columns(3)
-        with col_inizio:
-            data_in = st.date_input("Inizio Chiusura", value=date.today())
-        with col_fine:
-            data_fi = st.date_input("Fine Chiusura", value=date.today())
-        with col_motivo:
-            motivo_txt = st.text_input("Motivo (opzionale)", placeholder="Es: Ferie estive")
-            
-        if st.button("Imposta Chiusura Studio"):
-            # Salviamo la chiusura nel DB
-            nuova_chiusura = models.ChiusuraStraordinaria(
-                data_inizio=datetime.combine(data_in, datetime.min.time()),
-                data_fine=datetime.combine(data_fi, datetime.max.time()),
-                motivo=motivo_txt
-            )
-            db.add(nuova_chiusura)
-            db.commit()
-            st.success(f"Studio impostato come CHIUSO dal {data_in} al {data_fi}")
-            st.rerun()
-            
-        # Mostra le chiusure attive
-        chiusure_attive = db.query(models.ChiusuraStraordinaria).filter(models.ChiusuraStraordinaria.data_fine >= datetime.utcnow()).all()
-        if chiusure_attive:
-            st.info("📌 Periodi di chiusura pianificati:")
-            for c in chiusure_attive:
-                st.write(f"- Dal {c.data_inizio.strftime('%d/%m/%Y')} al {c.data_fine.strftime('%d/%m/%Y')} ({c.motivo or 'Nessun motivo specificato'})")
-
-        st.markdown("---")
-        
-        # Sezione ORARI SETTIMANALI
-        st.markdown("### ⏰ Orario di Ricevimento Ambulatorio")
-        giorni = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì"]
-        
-        for i, giorno in enumerate(giorni):
-            st.write(f"**{giorno}**")
-            # Cerca se c'è già un orario salvato
-            orario_esistente = db.query(models.OrarioStudio).filter_by(giorno_settimana=i).first()
-            
-            val_apertura = "08:00" if not orario_esistente else orario_esistente.ora_apertura
-            val_chiusura = "12:00" if not orario_esistente else orario_esistente.ora_chiusura
-            
-            c_ap, c_ch, c_salva = st.columns([2, 2, 1])
-            with c_ap:
-                ora_ap = st.text_input("Ora Apertura", value=val_apertura, key=f"ap_{i}")
-            with c_ch:
-                ora_ch = st.text_input("Ora Chiusura", value=val_chiusura, key=f"ch_{i}")
-            with c_salva:
-                st.write("") # Spazio per allineamento
-                if st.button("Salva", key=f"btn_{i}"):
-                    if not orario_esistente:
-                        orario_esistente = models.OrarioStudio(giorno_settimana=i)
-                    orario_esistente.ora_apertura = ora_ap
-                    orario_esistente.ora_chiusura = ora_ch
-                    db.add(orario_esistente)
-                    db.commit()
-                    st.success(f"Orario di {giorno} aggiornato!")
-
-    render_sidebar(None, db) # Sidebar ora usata per filtri, dettagli paziente non più mostrati qui
+    st.subheader("Dernières demandes")
+    for richiesta in richieste:
+        st.write(f"{richiesta.data_creazione}: {richiesta.testo}")
 
 if __name__ == "__main__":
-    main()
+    # Vérification de l'authentification
+    password = st.text_input("Mot de passe", type="password")
+    if password == os.getenv("DASHBOARD_PASSWORD"):
+        main()
+    elif password:
+        st.error("Mot de passe incorrect")
+    else:
+        st.warning("Veuillez entrer le mot de passe")
