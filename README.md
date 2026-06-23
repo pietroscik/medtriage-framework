@@ -67,6 +67,7 @@ medtriage-framework/
 
     # WhatsApp API (ottenuti dalla tua App su Meta for Developers)
     VERIFY_TOKEN="IL_TUO_VERIFY_TOKEN_SEGRETO"
+    META_APP_SECRET="IL_TUO_APP_SECRET_META" # opzionale, ma consigliato per verificare la firma webhook
     META_ACCESS_TOKEN="IL_TUO_TOKEN_DI_ACCESSO_META"
     META_PHONE_NUMBER_ID="L_ID_DEL_TUO_NUMERO_DI_TELEFONO"
 
@@ -107,6 +108,10 @@ Apri due terminali separati.
 - Notifiche Telegram:
   - Imposta `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` per ricevere notifiche su nuove richieste.
 
+- CORS backend:
+  - Imposta `CORS_ORIGINS` come lista separata da virgole se devi esporre l’API oltre `localhost`.
+  - Default: `http://localhost:8501,http://127.0.0.1:8501`.
+
 - Multi-medico leggero:
   - Nel dashboard (sidebar) seleziona il "Medico corrente". Le query e le assegnazioni useranno `medico_id` quando presente.
   - Quando salvi lo stato di una richiesta, se `medico_id` non è impostato viene assegnato il medico corrente.
@@ -118,10 +123,14 @@ Apri due terminali separati.
   - Esegui nightly: `python scripts/backup_db.py`
   - Configura `BACKUP_DIR` env var se vuoi un percorso diverso.
 
+- Worker coda WhatsApp:
+  - Esegui una volta: `python -m backend.queue --once`
+  - Esegui in loop: `python -m backend.queue --interval 30 --batch 50`
+
 ## Comandi utili
 
 - Installa dipendenze:
-  `pip install -r requirements.txt` (aggiungi cryptography, requests, redis, tenacity, pydantic se mancanti)
+  `pip install -r requirements.txt`
 
 - Migrazione rapida:
   `python backend/db_migrate_add_fields.py`

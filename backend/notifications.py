@@ -4,8 +4,14 @@ import requests
 from email.mime.text import MIMEText
 from .models import Richiesta
 import logging
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+load_dotenv()
+
+
+def _get_telegram_config():
+    return os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
 
 # --- Email ---
 def send_email_notification(richiesta: Richiesta):
@@ -41,8 +47,7 @@ def send_email_notification(richiesta: Richiesta):
 
 # --- Telegram (opzionale) ---
 def send_telegram_notification(richiesta: Richiesta):
-    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID = _get_telegram_config()
 
     if not all([TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]):
         return
@@ -75,6 +80,8 @@ def notify_medico(richiesta: Richiesta):
 
 # --- Funzione per invio Telegram ---
 def send_telegram_message(text: str) -> bool:
+    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID = _get_telegram_config()
+
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return False
 

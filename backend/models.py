@@ -1,10 +1,10 @@
 import os
 from cryptography.fernet import Fernet, InvalidToken
-from datetime import datetime
 from enum import Enum
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Enum as SAEnum, Table, JSON
 from sqlalchemy.orm import relationship
 from .database import Base
+from .time_utils import utc_now_naive
 
 # --- Enums ---
 class TipoRichiesta(Enum):
@@ -26,7 +26,7 @@ class Medico(Base):
     telefono = Column(String(50), nullable=True)
     # URL del database del singolo medico (es: sqlite:///./tenant_medico_123.db o postgresql://...)
     db_url = Column(String(1024), nullable=True, unique=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utc_now_naive, nullable=False)
 
     richieste = relationship("Richiesta", back_populates="medico")
 
@@ -38,7 +38,7 @@ class AuditLog(Base):
     entity_id = Column(Integer, nullable=False)
     action = Column(String(100), nullable=False)
     changed_by = Column(String(200), nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    timestamp = Column(DateTime, default=utc_now_naive, nullable=False)
     details = Column(Text, nullable=True)
 
 class Paziente(Base):
@@ -47,7 +47,7 @@ class Paziente(Base):
     numero_telefono = Column(String(32), unique=True, index=True, nullable=False)
     nome_cognome = Column(String(256), nullable=False)
     codice_fiscale = Column(String(32), unique=True, nullable=False)
-    data_registrazione = Column(DateTime, default=datetime.utcnow, nullable=False)
+    data_registrazione = Column(DateTime, default=utc_now_naive, nullable=False)
     # store ciphertext/plaintext in DB column "anamnesi"; access via property `anamnesi`
     anamnesi_encrypted = Column("anamnesi", Text, nullable=True)
 
@@ -78,7 +78,7 @@ class Richiesta(Base):
     tipo = Column(SAEnum(TipoRichiesta), nullable=False)
     stato = Column(SAEnum(StatoRichiesta), default=StatoRichiesta.NUOVA, nullable=False)
     dettagli = Column(Text, nullable=True)
-    data_creazione = Column(DateTime, default=datetime.utcnow, nullable=False)
+    data_creazione = Column(DateTime, default=utc_now_naive, nullable=False)
     risposta = Column(Text, nullable=True)  # ✅ Nuovo campo
     data_risposta = Column(DateTime, nullable=True)  # ✅ Nuovo campo
     paziente = relationship("Paziente", back_populates="richieste")
@@ -106,14 +106,14 @@ class FarmacoCronico(Base):
     id = Column(Integer, primary_key=True, index=True)
     paziente_id = Column(Integer, ForeignKey("pazienti.id"), nullable=False)
     nome_farmaco = Column(String(256), nullable=False)
-    data_ultimo_rinnovo = Column(DateTime, default=datetime.utcnow, nullable=False)
+    data_ultimo_rinnovo = Column(DateTime, default=utc_now_naive, nullable=False)
     paziente = relationship("Paziente", back_populates="farmaci_cronici")
 
 class NotaAnamnesi(Base):
     __tablename__ = "note_anamnesi"
     id = Column(Integer, primary_key=True, index=True)
     paziente_id = Column(Integer, ForeignKey("pazienti.id"), nullable=False)
-    data_evento = Column(DateTime, default=datetime.utcnow, nullable=False)
+    data_evento = Column(DateTime, default=utc_now_naive, nullable=False)
     categoria = Column(String(128), nullable=False)
     contenuto = Column(Text, nullable=False)
     paziente = relationship("Paziente", back_populates="note_anamnesi")
@@ -123,7 +123,7 @@ class StatoConversazione(Base):
     numero_telefono = Column(String(32), primary_key=True, index=True)
     stato_attuale = Column(String(64), default="START", nullable=False)
     dati_temporanei = Column(JSON, nullable=True)  # ✅ Fix: ora è JSON
-    ultima_interazione = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ultima_interazione = Column(DateTime, default=utc_now_naive, nullable=False)
 
 class RispostaRapida(Base):
     __tablename__ = "risposte_rapide"

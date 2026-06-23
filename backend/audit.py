@@ -1,6 +1,6 @@
-from datetime import datetime
 from backend.database import SessionLocal
 from backend.models import AuditLog
+from backend.time_utils import utc_now_naive
 
 def record_audit(entity: str, entity_id: int, action: str, changed_by: str, details: str | None = None):
     db = SessionLocal()
@@ -12,7 +12,7 @@ def record_audit(entity: str, entity_id: int, action: str, changed_by: str, deta
                 action=action,
                 changed_by=changed_by,
                 details=details,
-                timestamp=datetime.utcnow(),
+                timestamp=utc_now_naive(),
             )
         )
         db.commit()

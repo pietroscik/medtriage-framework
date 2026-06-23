@@ -7,8 +7,9 @@ from backend.models import (
     Paziente, Richiesta, StatoRichiesta, TipoRichiesta,
     OrarioStudio, ChiusuraStraordinaria, RispostaRapida, Tag
 )
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import random
+from backend.time_utils import utc_now_naive
 
 print("🌱 Inizializzazione seed dati di test...")
 
@@ -105,7 +106,7 @@ try:
                     tipo=tipo,
                     stato=stato,
                     dettagli=dettagli,
-                    data_creazione=datetime.utcnow() - timedelta(days=giorni_fa)
+                    data_creazione=utc_now_naive() - timedelta(days=giorni_fa)
                 )
                 db.add(richiesta)
 
@@ -118,7 +119,7 @@ try:
                 # Aggiungi risposta se evasa
                 if stato == StatoRichiesta.EVASA:
                     richiesta.risposta = f"Risposta a {dettagli}"
-                    richiesta.data_risposta = datetime.datetime.now(datetime.UTC) - timedelta(days=giorni_fa - 1)
+                    richiesta.data_risposta = datetime.now(timezone.utc) - timedelta(days=giorni_fa - 1)
 
             db.commit()
             print(f"✅ Paziente {nome} e richieste inseriti.")

@@ -5,9 +5,12 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 from sqlalchemy import desc
 from sqlalchemy.orm import joinedload
+from dotenv import load_dotenv
 
 from backend.database import SessionLocal, get_tenant_session_for_medico
 from backend.models import Medico, Richiesta, Paziente, StatoRichiesta
+
+load_dotenv()
 
 PASSWORD_FILE = Path(".dashboard_password")
 
@@ -18,33 +21,16 @@ def load_dashboard_password() -> str | None:
     return os.getenv("DASHBOARD_PASSWORD")
 
 
-def save_dashboard_password(new_password: str) -> None:
-    PASSWORD_FILE.write_text(new_password)
-
-
 def format_telefono(telefono: str) -> str:
     if telefono.startswith("39"):
         return f"+{telefono}"
     return telefono
 
 
-def get_attr_safe(obj, attr):
-    return getattr(obj, attr) if hasattr(obj, attr) else None
-
-
-def set_attr_safe(obj, attr, value):
-    if hasattr(obj, attr):
-        setattr(obj, attr, value)
-        return True
-    return False
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+def rerun_app() -> None:
+    rerun_fn = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
+    if rerun_fn:
+        rerun_fn()
 
 
 def show_login():
@@ -57,7 +43,7 @@ def show_login():
             st.session_state["authenticated"] = True
             if "current_medico_id" not in st.session_state:
                 st.session_state["current_medico_id"] = None
-            st.experimental_rerun()
+            rerun_app()
         else:
             st.error("❌ Password errata! Riprova.")
 
@@ -133,10 +119,10 @@ def render_medica_tab(master_db):
         return
 
     with tenant_db as db:
-        render_richieste_tenant(db)
+        render_richieste_tenant(db, current_medico_id)
 
 
-def render_richieste_tenant(db):
+def render_richieste_tenant(db, current_medico_id: int):
     st.title("Area Medica")
     st.markdown("Qui gestisci le richieste e lo storico del medico selezionato.")
 
@@ -179,11 +165,13 @@ def render_richieste_tenant(db):
             expanded=False
         ):
             st.markdown(f"**Paziente:** {richiesta.paziente.nome_cognome}")
-            st.markdown(f"**Telefono:** {richiesta.paziente.numero_telefono}")
+            st.markdown(f"**Telefono:** {format_telefono(richiesta.paziente.numero_telefono)}")
             st.markdown(f"**Stato:** {richiesta.stato.value}")
             st.markdown(f"**Dettagli:** {richiesta.dettagli}")
             if richiesta.note:
                 st.markdown(f"**Note:** {richiesta.note}")
+            if richiesta.risposta:
+                st.markdown(f"**Risposta:** {richiesta.risposta}")
             if richiesta.data_creazione:
                 st.markdown(f"**Creato il:** {richiesta.data_creazione}")
 
@@ -196,8 +184,22 @@ def render_richieste_tenant(db):
                     key=f"stato_{richiesta.id}"
                 )
             with col2:
-                if st.button("Aggiorna stato", key=f"aggiorna_{richiesta.id}"):
-                    richiesta.stato = StatoRichiesta(nuovo_stato)
-                    db.commit()
-                    st.success("Stato aggiornato")
-                    st.experimental_rerun()
+                note_corrente = st.text_area(
+                    "Note interne",
+                    value=richiesta.note or "",
+                    key=f"note_{richiesta.id}",
+                    height=120,
+                )
+
+            if st.button("Salva modifiche", key=f"salva_{richiesta.id}"):
+                richiesta.stato = StatoRichiesta(nuovo_stato)
+                richiesta.note = note_corrente.strip() or None
+                if richiesta.medico_id is None:
+                    richiesta.medico_id = current_medico_id
+                db.commit()
+                st.success("Modifiche salvate")
+                rerun_app()
+
+
+if __name__ == "__main__":
+    main()

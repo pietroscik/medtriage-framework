@@ -1,20 +1,17 @@
+# Core backend
 fastapi
 uvicorn
 sqlalchemy
-psycopg2-binary
 python-dotenv
-streamlit
 requests
 pydantic
-streamlit-autorefresh
 tenacity
-structlog
-matplotlib
-pandas
-python-multipart
-phonenumbers
 cryptography
-loguru
 redis
-elasticsearch
-firebase-admin
+
+# Database driver for PostgreSQL URLs
+psycopg2-binary
+
+# Dashboard
+streamlit
+streamlit-autorefresh

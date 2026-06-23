@@ -2,6 +2,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 import threading
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./medtriage.db")
 
@@ -12,7 +15,7 @@ engine = create_engine(
     connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
 )
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, expire_on_commit=False, bind=engine)
 
 _tenant_engines: dict[str, object] = {}
 _tenant_lock = threading.Lock()
@@ -35,7 +38,16 @@ def get_tenant_session_for_medico(medico_id: int):
         if tenant_engine is None:
             connect_args = {"check_same_thread": False} if tenant_url.startswith("sqlite") else {}
             tenant_engine = create_engine(tenant_url, connect_args=connect_args)
+            Base.metadata.create_all(bind=tenant_engine)
             _tenant_engines[tenant_url] = tenant_engine
 
-    TenantSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=tenant_engine)
+    TenantSessionLocal = sessionmaker(autocommit=False, autoflush=False, expire_on_commit=False, bind=tenant_engine)
     return TenantSessionLocal()
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

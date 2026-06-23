@@ -1,5 +1,8 @@
+import hashlib
+import hmac
+import json
 import os
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, Dict
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Query, Request, Response, status, HTTPException
@@ -11,6 +14,7 @@ from .database import Base, engine, get_db
 from .models import StatoConversazione, Paziente
 from .triage import is_studio_aperto, process_incoming_message
 from .whatsapp_client import send_template_blocking_message
+from .time_utils import utc_now_naive
 
 # Configura logging
 logging.basicConfig(
@@ -23,16 +27,27 @@ load_dotenv()
 
 app = FastAPI(title="MedTriage Framework Backend")
 
+def _load_cors_origins() -> list[str]:
+    raw_origins = os.getenv("CORS_ORIGINS")
+    if raw_origins:
+        return [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+    return [
+        "http://localhost:8501",
+        "http://127.0.0.1:8501",
+    ]
+
+
 # CORS (per dashboard e frontend esterni)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_load_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "verify_token_default")
+META_APP_SECRET = os.getenv("META_APP_SECRET")
 
 @app.on_event("startup")
 def startup() -> None:
@@ -47,12 +62,27 @@ def _find_or_create_conversation(db: Session, numero_telefono: str) -> StatoConv
             numero_telefono=numero_telefono,
             stato_attuale="START",
             dati_temporanei={},
-            ultima_interazione=datetime.utcnow(),
+            ultima_interazione=utc_now_naive(),
         )
         db.add(stato)
         db.commit()
         db.refresh(stato)
     return stato
+
+
+def _verify_meta_signature(raw_body: bytes, signature_header: str | None) -> bool:
+    if not META_APP_SECRET:
+        return True
+    if not signature_header:
+        return False
+
+    provided_signature = signature_header.removeprefix("sha256=").strip()
+    expected_signature = hmac.new(
+        META_APP_SECRET.encode("utf-8"),
+        raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected_signature, provided_signature)
 
 @app.get("/webhook")
 def webhook_verify(
@@ -70,9 +100,18 @@ def webhook_verify(
 @app.post("/webhook")
 async def webhook_payload(request: Request, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Elabora i messaggi in entrata da WhatsApp."""
-    payload = await request.json()
+    raw_body = await request.body()
+    if not _verify_meta_signature(raw_body, request.headers.get("X-Hub-Signature-256")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid webhook signature")
+
+    try:
+        payload = json.loads(raw_body or b"{}")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload")
+
     logger.info(f"📥 Ricevuto payload da WhatsApp: {len(payload.get('entry', []))} entries")
 
+    messages_processed = 0
     entries = payload.get("entry", [])
     for entry in entries:
         changes = entry.get("changes", [])
@@ -85,7 +124,7 @@ async def webhook_payload(request: Request, db: Session = Depends(get_db)) -> Di
                 if to_phone:
                     stato = _find_or_create_conversation(db, to_phone)
                     stato.stato_attuale = "MANUALE"
-                    stato.ultima_interazione = datetime.utcnow()
+                    stato.ultima_interazione = utc_now_naive()
                     db.add(stato)
                     db.commit()
                     logger.info(f"🔄 Messaggio echo da {to_phone} → stato MANUALE")
@@ -97,26 +136,30 @@ async def webhook_payload(request: Request, db: Session = Depends(get_db)) -> Di
                 telefono = message.get("from")
                 if not telefono:
                     continue
+                messages_processed += 1
 
-                # Controlla timeout globale (24h)
-                stato = _find_or_create_conversation(db, telefono)
-                if stato.ultima_interazione < datetime.utcnow() - timedelta(hours=24):
-                    stato.stato_attuale = "START"
-                    stato.dati_temporanei = {}
-                    db.commit()
-                    logger.info(f"⏳ Reset stato per {telefono} (timeout 24h)")
+                try:
+                    # Controlla timeout globale (24h)
+                    stato = _find_or_create_conversation(db, telefono)
+                    if stato.ultima_interazione < utc_now_naive() - timedelta(hours=24):
+                        stato.stato_attuale = "START"
+                        stato.dati_temporanei = {}
+                        db.commit()
+                        logger.info(f"⏳ Reset stato per {telefono} (timeout 24h)")
 
-                # Controlla se lo studio è aperto
-                if not is_studio_aperto(db):
-                    send_template_blocking_message(telefono, template_name="studio_chiuso")
-                    logger.info(f"🚪 Studio chiuso → messaggio a {telefono}")
-                    continue
+                    # Controlla se lo studio è aperto
+                    if not is_studio_aperto(db):
+                        send_template_blocking_message(telefono, template_name="studio_chiuso")
+                        logger.info(f"🚪 Studio chiuso → messaggio a {telefono}")
+                        continue
 
-                # Processa il messaggio
-                process_incoming_message(db, telefono, message)
-                logger.info(f"📝 Messaggio processato da {telefono}")
+                    # Processa il messaggio
+                    process_incoming_message(db, telefono, message)
+                    logger.info(f"📝 Messaggio processato da {telefono}")
+                except Exception:
+                    logger.exception("Errore durante il processamento del messaggio da %s", telefono)
 
-    return {"success": True, "messages_processed": len(messages)}
+    return {"success": True, "messages_processed": messages_processed}
 
 @app.post("/gdpr/delete/{paziente_id}")
 def gdpr_delete(paziente_id: int, db: Session = Depends(get_db)):
@@ -135,4 +178,4 @@ def gdpr_delete(paziente_id: int, db: Session = Depends(get_db)):
 @app.get("/health")
 def health_check():
     """Endpoint per monitoraggio."""
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "timestamp": utc_now_naive().isoformat()}

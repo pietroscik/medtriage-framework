@@ -1,8 +1,11 @@
 import os
 import shutil
 import subprocess
-from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv
+from backend.time_utils import utc_now_naive
+
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./medtriage.db")
 BACKUP_DIR = Path(os.getenv("BACKUP_DIR", "./backups"))
@@ -17,12 +20,12 @@ def backup_sqlite(url: str) -> Path:
         raise ValueError("URL SQLite non valido")
     if not source.exists():
         raise FileNotFoundError(f"DB SQLite non trovato: {source}")
-    target = BACKUP_DIR / f"medtriage_sqlite_{datetime.utcnow():%Y%m%d_%H%M%S}.db"
+    target = BACKUP_DIR / f"medtriage_sqlite_{utc_now_naive():%Y%m%d_%H%M%S}.db"
     shutil.copy2(source, target)
     return target
 
 def backup_postgres(url: str) -> Path:
-    filename = BACKUP_DIR / f"medtriage_postgres_{datetime.utcnow():%Y%m%d_%H%M%S}.sql"
+    filename = BACKUP_DIR / f"medtriage_postgres_{utc_now_naive():%Y%m%d_%H%M%S}.sql"
     subprocess.run(
         ["pg_dump", "--file", str(filename), url],
         check=True,
