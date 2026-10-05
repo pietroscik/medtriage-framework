@@ -1,5 +1,7 @@
 # MedTriage - WhatsApp Bot per Studi Medici
 
+> 💡 **Stato**: Proof of Concept — prototipo WhatsApp bot per lo smistamento delle richieste in studio medico; richiede validazione clinica prima di qualsiasi uso operativo.
+
 MedTriage è un sistema progettato per aiutare i medici di base a gestire le comunicazioni con i pazienti tramite WhatsApp. Automatizza la ricezione, la classificazione e la visualizzazione dei messaggi, liberando tempo prezioso e centralizzando le richieste in un'unica dashboard.
 
 ## ✨ Funzionalità Principali
@@ -36,7 +38,8 @@ medtriage-framework/
 
 ## ⚙️ Configurazione e Installazione
 
-1.  **Clona il repository**:
+1.  **Clona il reposito
+ry**:
     ```bash
     git clone https://github.com/tuo-utente/medtriage-framework.git
     cd medtriage-framework
@@ -101,7 +104,8 @@ Apri due terminali separati.
 
 ## Aggiornamenti operativi
 
-- Crittografia (opzionale): se imposti `FERNET_KEY` (base64) i campi sensibili (`anamnesi`, `note`) vengono cifrati. Se non impostata, i campi vengono salvati in chiaro (fallback per compatibilità).
+- Crittografia (opzionale): se imposti `FERNET_KEY` (base64) i campi sensibili (`anamnesi`, `note`) vengono cifrati. Se non impostata, i campi vengono salvati
+ in chiaro (fallback per compatibilità).
   - Genera chiave: `python - <<'PY'\nfrom cryptography.fernet import Fernet\nprint(Fernet.generate_key().decode())\nPY`
   - Esporta: `set FERNET_KEY=la_tua_chiave` (PowerShell / .env).
 
